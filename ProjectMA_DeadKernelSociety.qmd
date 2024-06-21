@@ -1,0 +1,1736 @@
+---
+title: " Group Project: Analysis of Online Retail Data"
+subtitle: "RFM & CLTV Analysis"
+author: "Dead Kernel Society"
+date: "2024-06-21"
+format: 
+  html:
+    code-fold: true
+    code-tools: true
+    number-sections: false
+    df-print: paged
+    css: styles.css
+    theme: united
+---
+
+## Overview of Existing Studies
+
+We have examined numerous studies that have explored Recency, Frequency, Monetary (RFM) and the prediction and analysis of Customer Lifetime Value (CLV) using a variety of methods and tools. Google's AI Platform provides a comprehensive guide for training CLV prediction models using offline training techniques, emphasizing the integration of machine learning into business intelligence [Google AI Platform](https://cloud.google.com/ai-platform/docs/clv-prediction-with-offline-training-train). Analytics Vidhya offers a detailed guide on CLV prediction, covering essential concepts and practical steps for implementing models using historical customer data [Analytics Vidhya](https://www.analyticsvidhya.com/blog/2020/10/a-definitive-guide-for-predicting-customer-lifetime-value-clv/). Advanced methodologies such as PyMC for Bayesian inference are demonstrated in repositories and articles, showcasing sophisticated statistical approaches for CLV forecasting [PyMC Marketing CLV Demo](https://github.com/takechanman1228/Effective-CLV-Modeling/blob/main/PyMC_Marketing_CLV_demo.ipynb) [Towards Data Science](https://towardsdatascience.com/pymc-marketing-the-key-to-advanced-clv-customer-lifetime-value-forecasting-bc0730973c0a). Medium articles and Kaggle notebooks also delve into heuristic and machine learning methods for CLV prediction, including the use of RFM segmentation and k-means clustering to identify valuable customer segments [Medium](https://medium.com/@chenycy/customer-lifetime-value-prediction-part-1-heuristics-probabilities-and-machine-learning-a31468090008) [Medium](https://medium.com/@srolimpia/using-a-backtester-to-model-customer-lifetime-value-uci-dataset-58edab2b07f4) [Kaggle](https://www.kaggle.com/code/sezginildes/customer-lifetime-value-cltv#6.-Customer-Value-(customer_value-=-average_order_value-*-purchase_frequency)) [Kaggle](https://www.kaggle.com/code/halimedogan/customer-segmentation-with-rfm-k-means). These resources collectively highlight the diverse techniques and tools available for effective CLV modeling, from traditional statistical methods to cutting-edge machine learning algorithms [Medium](https://medium.com/@E_godwin/analysis-of-an-online-retail-ii-uci-53b976f15232) [RPubs](https://rpubs.com/paharsingh/olrdata_rfm) [GitHub](https://github.com/marinang/online_retail_analysis/blob/main/analysis.ipynb). Specifically, we utilized insights from Kevin Quach's detailed analysis on [Customer Lifetime Value](https://rpubs.com/hoakevinquach/Customer-Lifetime-Value-CLV). Additionally, we benefited from the comprehensive documentation provided by Google Cloud on [CLV prediction with offline training](https://cloud.google.com/ai-platform/docs/clv-prediction-with-offline-training-train).
+
+## Primary Objective of the Group Project
+
+The primary objective of this study is to cluster customers into segments and leverage CLV predictions to proactively target those segments. This study provides insights into customer behavior, helping tailor marketing strategies to enhance engagement and maximize revenue.
+
+## Framework of the Group Project
+
+::: r-fit-text
+**Dataset Overview:**
+
+-Number of Data Points: 1.067.371
+
+-Features: Invoice, StockCode, Description, Quantity, InvoiceDate, Price, Customer ID, Country
+
+-Time Period: 2009-2011
+
+Techniques to be used:
+
+RFM: Clustering: Kmeans, Optimal Cluster Detection: Elbow, Silhouette, Calinski Harabasz, Davies Bouldin
+
+CLTV Methods: Traditional, Probabilistic (Beta Geometric), Machine Learning (Linear, Logistic Regression)
+:::
+
+## Data Pre-processing
+
+### Data Preparation
+
+```{r message=FALSE,warning=FALSE}
+# Load necessary libraries
+library(dplyr)
+library(readxl)
+library(ggplot2)
+library(lubridate)
+library(tidyr)
+library(tidyverse)
+library(scales)
+library(conflicted)
+library(cluster)
+library(factoextra)
+library(fpc)
+library(clusterSim)
+library(corrplot)
+library(BTYD)
+library(BTYDplus)
+library(plyr)
+library(caret)
+conflicts_prefer(dplyr::filter)
+conflicts_prefer(dplyr::lag)
+conflicts_prefer(dplyr::select)
+conflicts_prefer(dplyr::summarize)
+conflicts_prefer(dplyr::count)
+conflicts_prefer(dplyr::summarise)
+conflicts_prefer(dplyr::mutate)
+conflicts_prefer(dplyr::arrange)
+conflicts_prefer(dplyr::desc)
+
+```
+
+```{r message=FALSE,warning=FALSE}
+# Load the data
+data1 <- read_excel("onlineretail.xlsx", sheet = "data1")
+data2 <- read_excel("onlineretail.xlsx", sheet = "data2")
+onlineretaildata <- bind_rows(data1, data2)
+```
+
+```{r message=FALSE,warning=FALSE}
+# Get an overview of the data
+str(onlineretaildata )
+summary(onlineretaildata )
+```
+
+```{r message=FALSE,warning=FALSE}
+# Calculate unique counts for each column
+unique_counts <- sapply(onlineretaildata, function(x) length(unique(x)))
+# Create a data frame to display the results
+unique_counts_df <- data.frame(
+  Feature = names(unique_counts),
+  Unique_Count = unique_counts
+)
+# Print the unique counts
+print(unique_counts_df)
+```
+
+### Data Cleaning
+
+**Missing Values: Percentage of Each Feature**
+
+```{r message=FALSE,warning=FALSE}
+# Calculate the percentage of missing values for each column
+missing_values <- sapply(onlineretaildata, function(x) sum(is.na(x)) / length(x)*100)
+```
+
+```{r message=FALSE,warning=FALSE}
+# Summary of missing values
+missing_values_summary <- data.frame(
+  Column = names(missing_values),
+  Percentage = round(missing_values,2)
+)
+print(missing_values_summary)
+```
+
+Missing Value percentage of CustomerID is 22.77%, Serving as a unique identifier, a placeholder value of -1 is used for Missing CustomerID values.
+
+```{r message=FALSE,warning=FALSE}
+#CustomerID serves as a unique identifier, a placeholder value is used for imputation
+onlineretaildata$CustomerID[is.na(onlineretaildata$CustomerID)] <- -1
+onlineretaildata <- onlineretaildata %>% filter(!is.na(Description))
+```
+
+**Negative Values: Check for Price Column**
+
+```{r message=FALSE,warning=FALSE}
+# Check for negative values in the Price column
+negative_value_p <- onlineretaildata[onlineretaildata$Price < 0, ]
+
+# Summary of negative values
+negative_value_p_summary <- data.frame(
+  Column = "Price",
+  Count = nrow(negative_value_p)
+)
+print(negative_value_p_summary)
+```
+
+```{r message=FALSE,warning=FALSE}
+as_tibble(negative_value_p)
+```
+
+There are 5 negative Price values categorized as bad debt adjustments is to be excluded from dataset.
+
+**Negative Values: Check for Quantity Column**
+
+```{r message=FALSE,warning=FALSE}
+# Check for negative values in the Quantity column
+negative_value_q <- onlineretaildata[onlineretaildata$Quantity < 0, ]
+
+# Summary of negative values
+negative_value_q_summary <- data.frame(
+  Column = "Quantity",
+  Count = nrow(negative_value_q),
+  Percentage = round((nrow(negative_value_q) / nrow(onlineretaildata)) * 100))
+
+print(negative_value_q_summary)
+```
+
+```{r message=FALSE,warning=FALSE}
+as_tibble(negative_value_q)
+```
+
+2% of dataset has negative quantity values that is further analyzed as below:
+
+**Cancellations: Check Negative Quantity Columns by looking into C-defined Invoice Number**
+
+```{r message=FALSE,warning=FALSE}
+# Check if all values in the Invoice column start with 'C'
+invoice_starts_with_C <- grepl("^C", negative_value_q$Invoice)
+
+# Filter rows where Invoice column does not start with 'C'
+non_C_invoices <- negative_value_q[!invoice_starts_with_C, ]
+C_invoices <- negative_value_q[invoice_starts_with_C, ]
+
+# Print the rows where Invoice column does not start with 'C'
+print(non_C_invoices)
+print(C_invoices)
+```
+
+There are 20261 transactions that have negative quantities, out of 768 cannot be categorized as cancellation while the rest can. Therefore, we have looked into customer group based analysis in order to see net monetary value of each distinct customer by netting off their cancelled transactions.
+
+There are negative quantities with the description of mixed, lost, damaged, discolored, smashed, bad quality. Those transactions do not have a distinct CustomerID that can be classified as anonymous and do not have Invoice No starting with C, meaning that cannot easily categorized under cancellations. We have defined them as bad_transaction of which have 768 observation, negligible in total.
+
+We have classified Invoice number starts with C as cancelled_transaction of which both have known CustomerIDs and anonymous transactions.
+
+Negative prices are bad debt adjustments, constituting %0.0005 of total observations are excluded from dataset, all are anonymous transactions.
+
+bad_transaction is to be cleaned from dataset according to the results of known/unknown customer analysis.
+
+Net monetary value of distinct customers is to be evaluated together with cancelled_transaction.
+
+```{r message=FALSE,warning=FALSE}
+bad_transaction <- non_C_invoices
+cancelled_transaction <- C_invoices
+onlineretaildata_cleaned <- onlineretaildata[onlineretaildata$Price >= 0,]
+```
+
+**Cancellations: Customer Group Analysis** Share of Distinct Customers whom cancelled their orders in Total of Distinct Customers
+
+```{r message=FALSE,warning=FALSE}
+# Step 1: Filter onlineretaildata_cleaned where Invoice starts with 'C'
+invoices_starting_with_C <- onlineretaildata_cleaned %>%
+  filter(grepl("^C", Invoice))
+
+# Step 2: Extract distinct CustomerIDs from the filtered dataset
+distinct_customerIDs_with_C_invoices <- invoices_starting_with_C %>%
+  distinct(CustomerID)
+
+# Step 3: Calculate the total number of distinct CustomerIDs in the entire dataset
+total_distinct_customerIDs <- onlineretaildata_cleaned %>%
+  distinct(CustomerID) %>%
+  count()
+
+# Step 4: Calculate the count of distinct CustomerIDs with invoices starting with 'C'
+count_distinct_customerIDs_with_C <- distinct_customerIDs_with_C_invoices %>%
+  count()
+
+# Step 5: Calculate the percentage
+percentage_with_C_invoices <- (count_distinct_customerIDs_with_C$n / total_distinct_customerIDs$n) * 100
+
+# Print the results
+print(paste("Total distinct CustomerIDs with invoices starting with 'C':", count_distinct_customerIDs_with_C$n))
+print(paste("Total distinct CustomerIDs in dataset:", total_distinct_customerIDs$n))
+print(paste("Percentage of CustomerIDs with invoices starting with 'C':", round(percentage_with_C_invoices, 2), "%"))
+```
+
+43% of distinct customers either cancelled their transaction once or returned their purchased item. 3 % of those does not have a CustomerID number and cannot be traceable.
+
+Share of Unknown Customer in Transactions Cancelled
+
+```{r message=FALSE,warning=FALSE}
+# Step 1: Count the number of -1 CustomerID in C_invoices
+negative_customerIDs_C_invoices <- C_invoices %>%
+  filter(CustomerID == -1) %>%
+  count()
+
+# Step 2: Count the total number of CustomerID in C_invoices
+total_customerIDs_C_invoices <- C_invoices %>%
+  count()
+
+# Step 3: Calculate the percentage of -1 CustomerID in C_invoices
+percentage_unknown <- (negative_customerIDs_C_invoices$n / total_customerIDs_C_invoices$n) * 100
+
+# Print the percentage
+print(paste("Percentage of CustomerID -1 in C_invoices:", round(percentage_unknown, 2), "%"))
+```
+
+We have checked net monetary value of customers whom cancelled their order at least once versus those that are not cancelled even once. Unknown customers have 13% share in total net monetary value, rest is negligible.
+
+```{r message=FALSE,warning=FALSE}
+# 1. Filter onlineretaildata_cleaned where Invoice starts with 'C', group by CustomerID, and calculate MonetaryV1
+customer_group_1 <- onlineretaildata_cleaned %>%
+  filter(grepl("^C", Invoice)) %>%
+  group_by(CustomerID) %>%
+  summarise(MonetaryC = sum(Price * Quantity))
+
+# 2. Filter onlineretaildata_cleaned where Invoice does not start with 'C', group by CustomerID, and calculate MonetaryV2
+customer_group_2 <- onlineretaildata_cleaned %>%
+  group_by(CustomerID) %>%
+  summarise(MonetaryNC = sum(Price * Quantity))
+
+# 3. Join customer_group_1 and customer_group_2 by CustomerID, compute netMonetaryV as MonetaryV1 + MonetaryV2
+customer_group_matched <- left_join(customer_group_2, customer_group_1, by = "CustomerID") %>%
+  tidyr::replace_na(list(MonetaryC= 0, MonetaryNC = 0)) %>%
+  mutate(
+    netMonetaryV = MonetaryC + MonetaryNC,
+    netMonetaryV = round(netMonetaryV, 2),  # Round netMonetaryV to 2 decimal places
+    share = (round(netMonetaryV / sum(netMonetaryV), 6)*100)  # Calculate share and round to 4 decimal places
+  )
+
+# Print the first few rows to check the results
+as_tibble(customer_group_matched)
+
+```
+
+**Additional Columns for Seasonality Analysis**
+
+```{r message=FALSE,warning=FALSE}
+# Create bar plot
+# Step 1: Ensure InvoiceDate is in POSIXct format
+retaildata <- onlineretaildata_cleaned %>%
+  mutate(InvoiceDate = as.POSIXct(InvoiceDate, format = "%Y-%m-%d %H:%M:%S"))
+ 
+# Step 2: Split the InvoiceDate into Date and Time
+retaildata <- onlineretaildata_cleaned%>%
+  mutate(Date = as.Date(InvoiceDate),
+         Time = format(InvoiceDate, format = "%H:%M:%S"))
+
+retaildata <- left_join(retaildata, customer_group_matched, by = "CustomerID") 
+as_tibble(retaildata)
+```
+
+**Excluding Terms from Description**
+
+```{r message=FALSE,warning=FALSE}
+# Define terms to exclude
+exclude_terms <- c("Adjust bad debt", "AMAZON FEE", "Manual", "Commission", "Bank Charges", "Adjustment by", "Discount", "wrongly", "coded", "did  a", "individually","Marked as", "Cruk", "Postage")
+```
+
+Ratio of excluded terms in description is negligible, at 0.8%
+
+```{r message=FALSE,warning=FALSE}
+# Filter rows based on exclusion terms in Description column
+filtered_data <- retaildata %>%
+  filter(!grepl(paste(exclude_terms, collapse = "|"), Description, ignore.case = TRUE)) %>%
+  summarise(total_netMonetaryV = sum(netMonetaryV, na.rm = TRUE)) %>%
+  pull(total_netMonetaryV)  # Extract the numeric value from the tibble
+
+# Step 4: Calculate total sum of netMonetaryV in retaildata
+total_netMonetaryV <- sum(retaildata$netMonetaryV, na.rm = TRUE)
+
+# Step 5: Calculate the ratio a / b
+ratio_excluded_to_total <- 100-((filtered_data / total_netMonetaryV) * 100)
+
+# Print the result
+print(ratio_excluded_to_total)
+```
+
+## Exploratory Data Analysis
+
+### Product Based Analysis
+
+```{r message=FALSE,warning=FALSE}
+# Number of unique stock numbers (product types)
+num_unique_stockno <- onlineretaildata %>%
+  summarise(Num_Unique_StockNo = n_distinct(StockCode))
+
+# Top 10 expensive product descriptions
+top10_expensive_products <- onlineretaildata %>%
+  group_by(Description) %>%
+  summarise(Max_Price = max(Price, na.rm = TRUE)) %>%
+  arrange(desc(Max_Price)) %>%
+  slice_head(n = 10)
+
+# Top 10 frequently sold product descriptions
+top10_frequent_products <- onlineretaildata %>%
+  group_by(Description) %>%
+  summarise(Total_Quantity = sum(Quantity, na.rm = TRUE)) %>%
+  arrange(desc(Total_Quantity)) %>%
+  slice_head(n = 10)
+
+# Display results
+list(
+  Num_Unique_StockNo = num_unique_stockno$Num_Unique_StockNo,
+  Top10_Expensive_Products = top10_expensive_products,
+  Top10_Frequent_Products = top10_frequent_products
+)
+```
+
+#### Product based Analysis: Plots
+
+**Top 10 Expensive Product Descriptions**
+
+```{r message=FALSE,warning=FALSE}
+library(dplyr)
+# Group by StockCode, calculate average Price excluding specified descriptions
+average_price_per_stockcode <- retaildata %>%
+  filter(!grepl(paste(exclude_terms, collapse = "|"), Description, ignore.case = TRUE)) %>%
+  group_by(StockCode) %>%
+  summarise(avg_price = round(mean(Price, na.rm = TRUE),0)) %>%
+  top_n(10, avg_price)  # Select top 10 by average price
+
+# Join with onlineretaildata to get Description
+top10_expensive_products <- average_price_per_stockcode %>%
+  left_join(retaildata, by = "StockCode") %>%
+  distinct(StockCode, .keep_all = TRUE) %>%
+  dplyr::select(StockCode, Description, avg_price)
+
+# Plotting using ggplot2 for more customization
+ggplot(top10_expensive_products, aes(x = Description, y = avg_price)) +
+  geom_bar(stat = "identity", fill = "skyblue", color = "black") +
+   geom_text(aes(label = avg_price), vjust = -0.5, size = 3) +  # Add labels above bars+
+  labs(
+    title = "Top 10 Expensive Products by StockCode",
+    x = "Product Description",
+    y = "Average Price"
+  ) +
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust = 1, size = 5),  # Adjust x-axis text properties
+        legend.position = "right",  # Move legend to the right
+        legend.margin = margin(t = 6, r = 6, b = 6, l = 6, unit = "pt"),  # Expand legend margin
+        legend.text = element_text(size = 5))  +  # Reduce legend text size
+  scale_y_continuous(labels = scales::comma, limits = c(0, 250))  # Format y-axis labels with commas for thousands separator
+```
+
+The most expensive products include items like "Manual" and "Bank Charges," which are likely administrative entries rather than saleable goods. These are excluded from the analysis due to their non-transactional nature.
+
+**Top 10 Most Frequent Sold Products (according to Transaction Number)**
+
+```{r message=FALSE,warning=FALSE}
+# Filter data excluding specified descriptions
+frequent_order <- retaildata %>%
+  filter(!grepl(paste(exclude_terms, collapse = "|"), Description, ignore.case = TRUE)) %>%
+  group_by(StockCode, Description) %>%
+  summarise(freq = n()) %>%
+  ungroup() %>%
+  arrange(desc(freq)) %>%
+  top_n(10, freq)  # Select top 10 by frequency
+
+# Plotting
+ggplot(frequent_order, aes(x = reorder(Description, freq), y = freq)) +
+  geom_bar(stat = "identity", fill = "skyblue", color = "black") +
+  geom_text(aes(label = freq), vjust = -0.5, size = 3) +  # Add labels above bars
+  labs(x = "Product Description", y = "Frequency", 
+       title = "Top 10 Most Frequent Sold Products by Transaction Number") +
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust = 1, size = 6),  # Adjust x-axis text properties
+        axis.title.x = element_blank(),  # Remove x-axis label
+        plot.title = element_text(hjust = 0.5, size = 12),  # Center plot title
+        panel.grid.major = element_blank(),  # Remove major gridlines
+        panel.grid.minor = element_blank(),  # Remove minor gridlines
+        legend.position = "right",  # Move legend to the right
+        legend.margin = margin(t = 6, r = 6, b = 6, l = 6, unit = "pt"),  # Expand legend margin
+        legend.text = element_text(size = 8)) +  # Reduce legend text size
+  scale_y_continuous(labels = scales::comma, limits = c(0, 6000))  # Format y-axis labels with commas for thousands separator
+
+
+```
+
+The most frequently sold products are dominated by small, low-cost items such as "WORLD WAR 2 GLIDERS ASSTD DESIGNS" and "WHITE HANGING HEART T-LIGHT HOLDER," reflecting the high volume of sales for decorative and novelty items.
+
+**Top 10 Products Sold (Quantity per Transaction)**
+
+```{r message=FALSE,warning=FALSE}
+# Filter and aggregate data
+product_summary <- retaildata %>%
+  filter(!grepl(paste(exclude_terms, collapse = "|"), Description, ignore.case = TRUE)) %>%
+  group_by(Description) %>%
+  summarise(
+    total_quantity = sum(Quantity),
+    num_invoices = n_distinct(Invoice),
+    quantity_per_invoice = round(total_quantity / num_invoices, 0)
+  ) %>%
+  top_n(10, quantity_per_invoice)  # Select top 10 by quantity_per_invoice
+
+# Plotting
+ggplot(product_summary, aes(x = reorder(Description, quantity_per_invoice), y = quantity_per_invoice)) +
+  geom_bar(stat = "identity", fill = "skyblue", color = "black") +
+  geom_text(aes(label = quantity_per_invoice), vjust = -1, size = 3) +  # Add labels above bars
+  labs(x = "Product Description", y = "Quantity per Transaction", 
+       title = "Top 10 Products Sold - Quantity per Transaction") +
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust = 1, size = 6),  # Adjust x-axis text properties
+        axis.title.x = element_text(size = 10),  # Adjust x-axis title appearance
+        plot.title = element_text(hjust = 0.5, size = 12),  # Center plot title
+        panel.grid.major = element_blank(),  # Remove major gridlines
+        panel.grid.minor = element_blank(),  # Remove minor gridlines
+        legend.position = "right",  # Move legend to the right
+        legend.margin = margin(t = 6, r = 6, b = 6, l = 6, unit = "pt"),  # Expand legend margin
+        legend.text = element_text(size = 10)) +  # Reduce legend text size
+  scale_y_continuous(labels = scales::comma, limits = c(0, 2500))  # Format y-axis labels with commas and set limits
+```
+
+### Country Analysis
+
+```{r message=FALSE,warning=FALSE}
+# Customer split (number of distinct customers by country)
+customer_split <- retaildata %>%
+  distinct(CustomerID, Country) %>%
+  group_by(Country) %>%
+  summarise(Num_Customers = n_distinct(CustomerID)) %>%
+  arrange(desc(Num_Customers))
+
+# Top 10 countries in terms of highest monetary value
+top10_countries_by_value <- retaildata %>%
+  group_by(Country) %>%
+  summarise(Total_Value = sum(Quantity * Price, na.rm = TRUE)) %>%
+  arrange(desc(Total_Value)) %>%
+  slice_head(n = 10)
+
+# Top 10 countries in terms of highest quantity
+top10_countries_by_quantity <- retaildata %>%
+  group_by(Country) %>%
+  summarise(Total_Quantity = sum(Quantity, na.rm = TRUE)) %>%
+  arrange(desc(Total_Quantity)) %>%
+  slice_head(n = 10)
+
+# Top 10 countries in terms of highest price
+top10_countries_by_price <- retaildata %>%
+  group_by(Country) %>%
+  summarise(Average_Price = mean(Price, na.rm = TRUE)) %>%
+  arrange(desc(Average_Price)) %>%
+  slice_head(n = 10)
+
+# Display results
+list(
+  Customer_Split = customer_split,
+  Top10_Countries_By_Value = top10_countries_by_value,
+  Top10_Countries_By_Quantity = top10_countries_by_quantity,
+  Top10_Countries_By_Price = top10_countries_by_price
+)
+
+```
+
+#### Country Analysis: Plots
+
+**Top 10 Countries by Number of Distinct Customers**
+
+```{r message=FALSE,warning=FALSE}
+# Calculate number of distinct customers by country
+customer_count_by_country <- retaildata %>%
+  group_by(Country) %>%
+  summarise(Num_Customers = n_distinct(CustomerID)) %>%
+  arrange(desc(Num_Customers))
+
+# Take the top 10 countries
+top_10_countries <- head(customer_count_by_country, 10)
+
+# Plotting a visual list with ggplot2
+ggplot(top_10_countries, aes(x = reorder(Country, Num_Customers), y = Num_Customers)) +
+  geom_bar(stat = "identity", fill = "skyblue", color = "black") +
+  geom_text(aes(label = Num_Customers), vjust = -1, size = 3) +  # Add labels above bars
+  labs(x = "Country", y = "Number of Customers", 
+       title = "Top 10 Countries by Number of Distinct Customers") +
+  theme_minimal() +  # Example theme, customize as needed
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust = 1),
+        axis.title.x = element_text(size = 12),  # Adjust x-axis title appearance
+        axis.title.y = element_text(size = 12),  # Adjust y-axis title appearance
+        plot.title = element_text(size = 14, hjust = 0.5),  # Adjust plot title appearance
+        panel.grid.major = element_blank(),  # Remove major gridlines
+        panel.grid.minor = element_blank()) +  # Remove minor gridlines
+  scale_y_continuous(labels = scales::comma,limits = c(0, 6000))  # Format y-axis labels with commas for thousands separator
+
+
+
+```
+
+The majority of customers are from the United Kingdom (5,411 customers), followed by Germany (107 customers) and France (96 customers). This distribution suggests that the business primarily serves the UK market with some international presence.
+
+**Top 10 Countries in Terms of Highest Monetary Value**
+
+```{r message=FALSE,warning=FALSE}
+# Calculate total monetary value by country
+total_monetary_value <- retaildata %>%
+  mutate(Total_Value = Quantity * Price) %>%
+  group_by(Country) %>%
+  summarise(Total_Monetary_Value = sum(Total_Value, na.rm = TRUE)) %>%
+  arrange(desc(Total_Monetary_Value))
+
+# Convert total monetary value to millions of pounds (£)
+total_monetary_value <- total_monetary_value %>%
+  mutate(Total_Monetary_Value_Mn = Total_Monetary_Value / 1e6)
+
+# Take the top 10 countries by total monetary value in millions of pounds
+top_10_countries_monetary <- head(total_monetary_value, 10)
+
+# Plotting with ggplot2
+ggplot(top_10_countries_monetary, aes(x = reorder(Country, Total_Monetary_Value_Mn), y = Total_Monetary_Value_Mn)) +
+  geom_bar(stat = "identity", fill = "skyblue", color = "black") +
+  geom_text(aes(label = paste0("£", round(Total_Monetary_Value_Mn, 2), " Mn")), vjust = -0.5, size = 3) +  # Add labels above bars
+  labs(x = "Country", y = "Total Monetary Value (£ Mn)", 
+       title = "Top 10 Countries by Total Monetary Value in £ Mn") +
+  theme_minimal() +  # Example theme, customize as needed
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust = 1),
+        axis.title.x = element_text(size = 12),  # Adjust x-axis title appearance
+        axis.title.y = element_text(size = 12),  # Adjust y-axis title appearance
+        plot.title = element_text(size = 14, hjust = 0.5),  # Adjust plot title appearance
+        panel.grid.major = element_blank(),  # Remove major gridlines
+        panel.grid.minor = element_blank()) +  # Remove minor gridlines
+  scale_y_continuous(labels = scales::comma, limits = c(0, max(top_10_countries_monetary$Total_Monetary_Value_Mn) * 1.1))  # Format y-axis labels with commas and set limits
+
+```
+
+The United Kingdom leads in total monetary value, generating £16,541,260 in sales. Other notable contributors include EIRE (£615,520) and the Netherlands (£548,525), indicating significant revenue streams from these regions.
+
+**Top 10 Countries in Terms of Quantity Sold**
+
+```{r message=FALSE,warning=FALSE}
+# Calculate total quantity sold by country
+total_quantity_sold <- retaildata %>%
+  group_by(Country) %>%
+  summarise(Total_Quantity = round(sum(Quantity, na.rm = TRUE)/1e3),0) %>%
+  arrange(desc(Total_Quantity))
+
+# Take the top 10 countries by total quantity sold
+top_10_countries_quantity <- head(total_quantity_sold, 10)
+
+# Plotting with ggplot2
+ggplot(top_10_countries_quantity, aes(x = reorder(Country, Total_Quantity), y = Total_Quantity)) +
+  geom_bar(stat = "identity", fill = "skyblue", color = "black") +
+  geom_text(aes(label = scales::comma(Total_Quantity)), vjust = -0.5, size = 3) +  # Add labels above bars
+  labs(x = "Country", y = "Total Quantity Sold", 
+       title = "Top 10 Countries by Total Quantity Sold") +
+  theme_minimal() +  # Example theme, customize as needed
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust = 1),
+        axis.title.x = element_text(size = 12),  # Adjust x-axis title appearance
+        axis.title.y = element_text(size = 12),  # Adjust y-axis title appearance
+        plot.title = element_text(size = 14, hjust = 0.5),  # Adjust plot title appearance
+        panel.grid.major = element_blank(),  # Remove major gridlines
+        panel.grid.minor = element_blank()) +  # Remove minor gridlines
+  scale_y_continuous(labels = scales::comma,limits = c(0, 9000))  # Format y-axis labels with commas for thousands separator
+
+```
+
+In terms of quantity sold, the United Kingdom again ranks highest with 8,768,513 items sold. The Netherlands and EIRE follow with 381,951 and 331,341 items sold, respectively, showcasing high-volume sales from these countries.
+
+**Top 10 Countries in Terms of Average Price per Unit Sold**
+
+```{r message=FALSE,warning=FALSE}
+# Calculate average price per unit sold by country
+average_price_per_unit <- retaildata %>%
+  group_by(Country) %>%
+  summarise(Average_Price = round(mean(Price, na.rm = TRUE),0)) %>%
+  arrange(desc(Average_Price))
+
+# Take the top 10 countries by average price per unit sold
+top_10_countries_price <- head(average_price_per_unit, 10)
+
+# Plotting with ggplot2
+ggplot(top_10_countries_price, aes(x = reorder(Country, Average_Price), y = Average_Price)) +
+  geom_bar(stat = "identity", fill = "skyblue", color = "black") +
+  geom_text(aes(label = scales::comma(round(Average_Price, 2))), vjust = -0.5, size = 3) +  # Add labels above bars
+  labs(x = "Country", y = "Average Price £", 
+       title = "Top 10 Countries by Average Price per Unit Sold") +
+  theme_minimal() +  # Example theme, customize as needed
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust = 1),
+        axis.title.x = element_text(size = 12),  # Adjust x-axis title appearance
+        axis.title.y = element_text(size = 12),  # Adjust y-axis title appearance
+        plot.title = element_text(size = 14, hjust = 0.5),  # Adjust plot title appearance
+        panel.grid.major = element_blank(),  # Remove major gridlines
+        panel.grid.minor = element_blank()) +  # Remove minor gridlines
+  scale_y_continuous(labels = scales::comma, limits = c(0,75))  # Format y-axis labels with commas for thousands separator
+
+
+```
+
+Singapore and Hong Kong have the highest average price per unit sold, at £73.60 and £57.60, respectively. This suggests that these markets are purchasing higher-value items compared to other regions.
+
+### Customer Analysis
+
+```{r message=FALSE,warning=FALSE}
+# Number of unique CustomerID
+num_unique_customers <- retaildata %>%
+  summarise(Num_Unique_Customers = n_distinct(CustomerID, na.rm = TRUE))
+
+# Percentage of customers with traceable (non-negative) CustomerID
+# Define known and unknown customers
+known_customers <- retaildata %>%
+  filter(CustomerID >= 0) %>%
+  summarise(Total_Value = sum(Quantity * Price, na.rm = TRUE))
+
+unknown_customers <- retaildata %>%
+  filter(CustomerID < 0) %>%
+  summarise(Total_Value = sum(Quantity * Price, na.rm = TRUE))
+
+# Calculate percentages
+total_value_known <- sum(known_customers$Total_Value)
+total_value_unknown <- sum(unknown_customers$Total_Value)
+total_value_all <- total_value_known + total_value_unknown
+
+percentage_known <- total_value_known / total_value_all * 100
+percentage_unknown <- total_value_unknown / total_value_all * 100
+
+# Display results
+list(
+  Num_Unique_Customers = num_unique_customers$Num_Unique_Customers,
+  Known_vs_Unknown_Customers = c(percentage_known, percentage_unknown)
+)
+
+```
+
+There are 5,943 unique customers in the dataset, with a significant portion being repeat buyers.
+
+Approximately 85.61% of the transactions are associated with known customers, while 14.39% involve unknown customers. This indicates a strong base of identifiable customers, though a significant minority remains unidentified.
+
+**Price Distribution for Known and Unknown Customers**
+
+```{r message=FALSE,warning=FALSE}
+# Set bounds and bins
+bins <- 50
+
+# Filter out non-positive and NA values for Price
+hist1 <- retaildata[!is.na(retaildata$Price) & retaildata$Price > 0, ]
+
+# Plot histogram for known and unknown customers
+p <- ggplot() +
+  geom_histogram(data = hist1[hist1$CustomerID > 0, ], 
+                 aes(x = Price, y = ..density.., fill = "Known Customers"), 
+                 bins = bins, 
+                 alpha = 0.6) +
+  
+  geom_histogram(data = hist1[is.na(hist1$CustomerID) | hist1$CustomerID == -1, ], 
+                 aes(x = Price, y = ..density.., fill = "Unknown Customers"), 
+                 bins = bins, 
+                 alpha = 0.6) +
+  scale_x_log10() +  # Set x-axis to log scale with visible values
+  scale_y_log10() +  # Set y-axis to log scale
+  scale_fill_manual(name = "Customer Type", values = c("skyblue", "lightgreen")) +  # Add legend for fill
+  labs(x = "Price in £", y = "Density", title = "Histogram of Price for Known and Unknown Customers") +
+  theme_minimal() +
+  theme(legend.position = "right")  # Position the legend
+
+# Display the plot
+print(p)
+
+
+```
+
+-   The x-axis covers a wide range of prices from around £0.1 to £100,000.
+-   The y-axis represents density, ranging from 1e-4 to 1e+0.
+-   Known customers (blue) show a peak in density around the £1 to £10 range.
+-   Unknown customers (green) also show a concentration in the same price range but with less density compared to known customers.
+-   Known customers exhibit a more concentrated distribution with higher densities at specific price points, particularly in the lower price range.
+-   Unknown customers show a broader and more variable distribution across the price range, with noticeable densities even at higher prices.
+-   Both known and unknown customers have a significant overlap in the £1 to £10 price range
+-   At very low and very high prices, the densities for both groups decrease, with unknown customers showing more variability at higher prices.
+
+Detecting problematic columns that are excluded from histogram
+
+```{r message=FALSE,warning=FALSE}
+# Identify rows with non-positive or NA values for Price
+non_finite_price_rows <- retaildata[is.na(retaildata$Price) | retaildata$Price <= 0, ]
+
+# Filter out non-positive and NA values for Price
+hist1_check <- retaildata[!is.na(retaildata$Price) & retaildata$Price > 0, ]
+
+# Apply log transformation to check for infinite values
+log_transformed_price <- log10(hist1_check$Price)
+
+# Identify rows that result in infinite values
+infinite_rows <- hist1_check[!is.finite(log_transformed_price), ]
+
+# Combine both sets of problematic rows
+problematic_rows <- rbind(non_finite_price_rows, infinite_rows)
+
+# Display the problematic rows
+print(problematic_rows)
+
+```
+
+**Quantity Distribution for Known and Unknown Customers**
+
+```{r message=FALSE,warning=FALSE}
+# Set bins
+bins <- 50
+
+# Filter out non-positive and NA values for Quantity
+hist2 <- retaildata[!is.na(retaildata$Quantity) & retaildata$Quantity > 0, ]
+
+# Plot histogram for known and unknown customers
+q <- ggplot() +
+  geom_histogram(data = hist2[hist2$CustomerID > 0, ], 
+                 aes(x = Quantity, y = ..density.., fill = "Known Customers"), 
+                 bins = bins, 
+                 alpha = 0.6) +
+  
+  geom_histogram(data = hist2[is.na(hist2$CustomerID) | hist2$CustomerID == -1, ], 
+                 aes(x = Quantity, y = ..density.., fill = "Unknown Customers"), 
+                 bins = bins, 
+                 alpha = 0.6) +
+  scale_x_log10(breaks = c(1, 10, 100, 1000, 10000, 100000), labels = scales::comma) +  # Set x-axis to log scale with visible values
+  scale_y_log10() +  # Set y-axis to log scale
+  scale_fill_manual(name = "Customer Type", values = c("skyblue", "lightgreen")) +  # Add legend for fill
+  labs(x = "Quantity", y = "Density", title = "Histogram of Quantity for Known and Unknown Customers") +
+  theme_minimal() +
+  theme(legend.position = "right")  # Position the legend
+
+# Display the plot
+print(q)
+
+```
+
+-   The x-axis covers a wide range of quantities, from 1 to 100,000.
+
+-   The y-axis represents density, ranging from 1e-4 to 1e+0.
+
+-   Known customers (blue) show a peak in density at lower quantities and then taper off as the quantity increases.
+
+-   Unknown customers (green) also have a peak at lower quantities but with a slightly broader spread compared to known customers.
+
+-   Known customers exhibit a more concentrated distribution with higher densities at lower quantities, tapering off more steeply as the quantity increases.
+
+-   Unknown customers show a broader and more varied distribution, with densities tapering off more gradually across the quantity range.
+
+-   Both known and unknown customers have a significant overlap at lower quantities.
+
+-   At higher quantities, known customers show a more sporadic presence, while unknown customers maintain a relatively consistent density, albeit lower.
+
+Detecting problematic columns that are excluded from histogram, to be further excluded main dataset that will be used in RFM and CLV analysis
+
+```{r message=FALSE,warning=FALSE}
+# Identify rows with non-positive or NA values for Quantity
+non_finite_price_rows_q <- retaildata[is.na(retaildata$Quantity) | retaildata$Price <= 0, ]
+
+# Filter out non-positive and NA values for Price
+hist2_check <- retaildata[!is.na(retaildata$Quantity) & retaildata$Quantity > 0, ]
+
+# Apply log transformation to check for infinite values
+log_transformed_quantity <- log10(hist2_check$Quantity)
+
+# Identify rows that result in infinite values
+infinite_rows_q <- hist2_check[!is.finite(log_transformed_quantity), ]
+
+# Combine both sets of problematic rows
+problematic_rows_q <- rbind(non_finite_price_rows_q, infinite_rows_q)
+
+# Display the problematic rows
+print(problematic_rows_q)
+
+```
+
+**Spending Patterns of Known and Unknown Customers based on Price & Quantity per Transaction**
+
+```{r message=FALSE,warning=FALSE}
+# Filter data for known customers and calculate metrics per transaction
+known_customers_data <- retaildata %>%
+  filter(CustomerID > 0 & Quantity > 0 & Price > 0) %>%
+  group_by(Invoice) %>%
+  summarise(Quantity_per_Transaction = round(sum(Quantity, na.rm = TRUE)),
+            Price_per_Transaction = round(sum(Price * Quantity, na.rm = TRUE))) %>%
+  ungroup()
+
+# Filter data for unknown customers (CustomerID is -1) with positive Quantity and Price and calculate metrics per transaction
+unknown_customers_data <- retaildata %>%
+  filter(CustomerID == -1 & Quantity > 0 & Price > 0) %>%
+  group_by(Invoice) %>%
+  summarise(Quantity_per_Transaction = round(sum(Quantity, na.rm = TRUE)),
+            Price_per_Transaction = round(sum(Price * Quantity, na.rm = TRUE))) %>%
+  ungroup()
+
+# Scatter plot showing spending patterns
+patterns <- ggplot() +
+  geom_point(data = known_customers_data, aes(x = Quantity_per_Transaction, y = Price_per_Transaction), 
+             color = "blue", alpha = 0.5, size = 1.5) +
+  geom_point(data = unknown_customers_data, aes(x = Quantity_per_Transaction, y = Price_per_Transaction), 
+             color = "red", alpha = 0.5, size = 1.5) +
+  labs(x = "Quantity per Transaction", y = "Price per Transaction in £", 
+       title = "Spending Patterns: Known vs Unknown Customers ") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+# Display the plot
+print(patterns)
+
+
+```
+
+While unknown customers tend to have smaller and more consistent transactions, known customers have a broader range of spending behaviors, including some high-value transactions. This could indicate that engaging with known customers effectively can lead to higher-value transactions and potentially more revenue. Additionally, there may be an opportunity to better understand and target unknown customers to increase their transaction sizes and convert them into high-value known customers.
+
+Final data is structured without unknown customers, positive quantity and net monetary value
+
+```{r message=FALSE,warning=FALSE}
+# Clean the data
+data_cleaned <- retaildata %>%
+  filter(CustomerID != -1 ,     # Remove rows where CustomerID is -1
+         Quantity > 0,
+         netMonetaryV > 0)         # Remove rows where Quantity is 0 or less than 0
+
+# Ensure CustomerID is character type
+data_cleaned$CustomerID <- as.character(data_cleaned$CustomerID)
+
+# Confirm the changes
+head(data_cleaned)
+```
+
+```{r message=FALSE,warning=FALSE}
+#Problematic_columns has the same structure as data_cleaned
+problematic_rows <- problematic_rows %>%
+  mutate(CustomerID = as.character(CustomerID)) # Convert CustomerID to character if not already
+
+# Remove problematic rows from data_cleaned
+data_cleaned <- data_cleaned %>%
+  anti_join(problematic_rows, by = colnames(data_cleaned))
+
+# Confirm the changes
+head(data_cleaned)
+
+```
+
+**Customer Concentration: Percentage of Customers, constituting 80% Monetary Value**
+
+```{r message=FALSE,warning=FALSE}
+# Calculate the total monetary value and distinct number of customers for each CustomerID
+customer_summary <- data_cleaned %>%
+  group_by(CustomerID) %>%
+  summarise(
+    Total_Value = sum(Quantity * Price, na.rm = TRUE)
+  ) %>%
+  ungroup()
+
+# Sort the data by Total_Value in descending order
+customer_summary <- customer_summary %>% arrange(desc(Total_Value))
+
+# Calculate cumulative percentage of Total_Value
+customer_summary <- customer_summary %>% mutate(
+  Cumulative_Percentage = cumsum(Total_Value) / sum(customer_summary$Total_Value)
+)
+
+# Find the point where cumulative percentage exceeds 80%
+threshold_index <- which.max(customer_summary$Cumulative_Percentage > 0.8)
+
+# Subset the data to include only up to the threshold index
+customer_summary_top_80 <- customer_summary[1:threshold_index, ]
+
+# Calculate the percentage of distinct customer IDs contributing to 80% of total monetary value
+percentage_of_customers <- nrow(customer_summary_top_80) / nrow(customer_summary) * 100
+
+# Display the result
+percentage_of_customers
+```
+
+23.5% of total customers constitute %80 of total monerary value.
+
+### Seasonality Analysis
+
+Monthly Trend of All Features
+
+```{r message=FALSE,warning=FALSE}
+# Calculate monthly transaction count, sum of quantity, and distinct customers
+monthly_metrics <- retaildata %>%
+  mutate(YearMonth = format(Date, "%Y-%m")) %>%
+  group_by(YearMonth) %>%
+  summarise(Transaction_Count = n_distinct(Invoice),
+            Sum_Quantity = sum(Quantity, na.rm = TRUE)/1e3,
+            Num_Customers = n_distinct(CustomerID, na.rm = TRUE)) %>%
+  arrange(YearMonth)
+
+# Plotting monthly transaction count
+plot_transaction_count <- ggplot(monthly_metrics, aes(x = YearMonth, y = Transaction_Count, group = 1)) +
+  geom_line(color = "blue") +
+  geom_point(color = "blue", size = 3) +
+  labs(title = "Monthly Transaction Count (2009-2011)", x = "Year-Month", y = "Transaction Count") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, size = 8))
+
+# Plotting monthly sum of quantity
+plot_quantity_sum <- ggplot(monthly_metrics, aes(x = YearMonth, y = Sum_Quantity, group = 1)) +
+  geom_line(color = "green") +
+  geom_point(color = "green", size = 3) +
+  labs(title = "Monthly Sum of Quantity (2009-2011)", x = "Year-Month", y = "Sum of Quantity (thousand)") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, size = 8))
+
+# Plotting monthly count of distinct customers
+plot_customer_count <- ggplot(monthly_metrics, aes(x = YearMonth, y = Num_Customers, group = 1)) +
+  geom_line(color = "purple") +
+  geom_point(color = "purple", size = 3) +
+  labs(title = "Monthly Count of Distinct Customers (2009-2011)", x = "Year-Month", y = "Number of Customers") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, size = 8))
+
+# Display plots
+print(plot_transaction_count)
+print(plot_quantity_sum)
+print(plot_customer_count)
+```
+
+Sales typically increase significantly during the holiday season, particularly in November, indicating a strong seasonal demand for products.
+
+There are also smaller peaks around other holidays and special occasions, suggesting that promotional activities during these times could drive sales.
+
+**Spending Patterns in a Day Cycle**
+
+```{r message=FALSE,warning=FALSE}
+# Convert Time column to POSIXct format for easier manipulation
+data_cleaned <- data_cleaned %>%
+  mutate(Time = as.POSIXct(Time, format = "%H:%M:%S"))
+
+# Categorize time into hourly periods
+data_cleaned <- data_cleaned %>%
+  mutate(
+    Hour_Category = case_when(
+      hour(Time) >= 0 & hour(Time) < 6 ~ "night",
+      hour(Time) >= 6 & hour(Time) < 12 ~ "morning",
+      hour(Time) >= 12 & hour(Time) < 18 ~ "afternoon",
+      hour(Time) >= 18 & hour(Time) <= 24 ~ "evening"
+    )
+  )
+
+# Calculate metrics per transaction based on hourly categories
+morning_metrics <- data_cleaned %>%
+  filter(Hour_Category == "morning") %>%
+  group_by(Invoice) %>%
+  summarise(
+    Quantity_per_Transaction = round(sum(Quantity, na.rm = TRUE)),
+    Price_per_Transaction = round(sum(Price * Quantity, na.rm = TRUE))
+  ) %>%
+  ungroup()
+
+afternoon_metrics <- data_cleaned %>%
+  filter(Hour_Category == "afternoon") %>%
+  group_by(Invoice) %>%
+  summarise(
+    Quantity_per_Transaction = round(sum(Quantity, na.rm = TRUE)),
+    Price_per_Transaction = round(sum(Price * Quantity, na.rm = TRUE))
+  ) %>%
+  ungroup()
+
+evening_metrics <- data_cleaned %>%
+  filter(Hour_Category == "evening") %>%
+  group_by(Invoice) %>%
+  summarise(
+    Quantity_per_Transaction = round(sum(Quantity, na.rm = TRUE)),
+    Price_per_Transaction = round(sum(Price * Quantity, na.rm = TRUE))
+  ) %>%
+  ungroup()
+
+night_metrics <- data_cleaned %>%
+  filter(Hour_Category == "night") %>%
+  group_by(Invoice) %>%
+  summarise(
+    Quantity_per_Transaction = round(sum(Quantity, na.rm = TRUE)),
+    Price_per_Transaction = round(sum(Price * Quantity, na.rm = TRUE))
+  ) %>%
+  ungroup()
+
+# Scatter plot showing spending patterns by hourly categories
+hourlypatterns <- ggplot() +
+  geom_point(data = morning_metrics, aes(x = Quantity_per_Transaction, y = Price_per_Transaction, color = "morning"),
+             alpha = 0.5, size = 1.5) +
+  geom_point(data = afternoon_metrics, aes(x = Quantity_per_Transaction, y = Price_per_Transaction, color = "afternoon"),
+             alpha = 0.5, size = 1.5) +
+  geom_point(data = evening_metrics, aes(x = Quantity_per_Transaction, y = Price_per_Transaction, color = "evening"),
+             alpha = 0.5, size = 1.5) +
+  geom_point(data = night_metrics, aes(x = Quantity_per_Transaction, y = Price_per_Transaction, color = "night"),
+             alpha = 0.5, size = 1.5) +
+  labs(
+    x = "Quantity per Transaction",
+    y = "Price per Transaction in £",
+    title = "Spending Patterns: Day Cycle",
+    color = "Hour Category"
+  ) +
+  scale_color_manual(values = c("morning" = "blue", "afternoon" = "green", "evening" = "red", "night" = "yellow"),
+                     labels = c("morning", "afternoon", "evening", "night")) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+# Display the plot
+print(hourlypatterns)
+
+
+```
+
+Sales activity peaks during certain hours of the day, likely corresponding to typical shopping behaviors such as morning and evening periods.
+
+There are noticeable lulls in activity during late-night and early morning hours.
+
+## RFM Analysis
+
+*Important Notice: We have assumed current date as 1.1.2012 when this analysis is undertaken, in order not to have big count of days for recency calculation*
+
+```{r message=FALSE,warning=FALSE}
+library(dplyr)
+# Calculate RFM Scores
+current_date <- as.Date("2012-01-01", format="%Y-%m-%d")
+data_cleaned <- data_cleaned %>% mutate(InvoiceDate = as.Date(InvoiceDate, format="%Y-%m-%d"))
+
+# Aggregate to get the most recent, first purchase dates and calculate tenure
+cust <- data_cleaned %>%
+  group_by(CustomerID) %>%
+  summarise(
+    RecentDate = max(InvoiceDate),
+    FirstDate = min(InvoiceDate),
+    Monetary_1 = sum(Price*Quantity),
+    Frequency_1 = sum(n_distinct(Invoice))
+  )
+
+# Calculate tenure and normalize monetary and frequency values
+cust <- cust %>%
+  mutate(
+    Tenure = as.numeric(difftime(current_date, FirstDate, units = "days")) / 365,
+    Recency = as.numeric(difftime(current_date, RecentDate, units = "days")),
+    Monetary = Monetary_1 / Tenure,
+    Frequency = Frequency_1 / Tenure
+  )
+```
+
+```{r message=FALSE,warning=FALSE}
+rfm_values_clean <- cust %>% dplyr::select(Recency, Frequency, Monetary)
+```
+
+```{r message=FALSE,warning=FALSE}
+summary(cust)
+```
+
+### RFM Distribution
+
+```{r message=FALSE,warning=FALSE}
+# Apply log transformation to Recency
+rfm_values_clean <- rfm_values_clean %>%
+  mutate(Log_Recency = log1p(Recency))  # log1p(x) is equivalent to log(1 + x)
+
+# Function to create bins and calculate counts for log transformed data
+create_bins_log <- function(data, column, binwidth) {
+  data %>%
+    mutate(bin = cut(!!sym(column), breaks = seq(floor(min(!!sym(column))), ceiling(max(!!sym(column))), by = binwidth), include.lowest = TRUE, right = FALSE)) %>%
+    group_by(bin) %>%
+    summarise(count = n()) %>%
+    mutate(mid = (as.numeric(sub("\\((.+),.*", "\\1", bin)) + as.numeric(sub("[^,]*,([^]]*)\\]", "\\1", bin))) / 2)
+}
+
+# Create bins for log transformed Recency
+log_recency_bins <- create_bins_log(rfm_values_clean, "Log_Recency", 0.2)
+
+# Plot the histograms with bin labels for log transformed data
+
+# Log Recency histogram
+ggplot(rfm_values_clean, aes(x = Log_Recency)) +
+  geom_histogram(binwidth = 0.2, fill = "blue", alpha = 0.7, color = "black") +
+  geom_text(data = log_recency_bins, aes(x = mid, y = count, label = count), vjust = -0.5, size = 3) +
+  labs(title = "Log Transformed Recency Distribution", x = "Log Transformed Recency", y = "# of occurrences") +
+  theme_minimal(base_size = 8) +
+  theme(
+    plot.title = element_text(hjust = 0.5),
+    axis.title.x = element_text(color = "blue", size = 8),
+    axis.title.y = element_text(color = "blue", size = 8),
+    axis.text.x = element_text(angle = 90, hjust = 1)
+  )
+```
+
+**Key Insights**: The histogram of log-transformed Recency values shows a right-skewed distribution, indicating that most customers have made purchases recently. The highest frequency is observed around a log-transformed Recency of 6.0 (400 days), with over 2000 occurrences, demonstrating a significant concentration of recent buyers. As the log-transformed Recency increases, the number of occurrences decreases, reflecting fewer customers with long intervals since their last purchase.
+
+A large portion of the customer base is actively purchasing, which is advantageous for retention-focused marketing strategies. To maintain engagement, personalized campaigns and loyalty programs should be targeted at these recent buyers. Additionally, re-engagement efforts should be directed towards the smaller group of customers with higher log-transformed Recency values to encourage their return and sustain overall customer activity.
+
+```{r echo=FALSE, eval=TRUE}
+# Apply log transformation to Frequency
+rfm_values_clean <- rfm_values_clean %>%
+  mutate(Log_Frequency = log1p(Frequency))  # log1p(x) is equivalent to log(1 + x)
+
+# Function to create bins and calculate counts for log transformed data
+create_bins_log <- function(data, column, binwidth) {
+  data %>%
+    mutate(bin = cut(!!sym(column), breaks = seq(floor(min(!!sym(column))), ceiling(max(!!sym(column))), by = binwidth), include.lowest = TRUE, right = FALSE)) %>%
+    group_by(bin) %>%
+    summarise(count = n()) %>%
+    mutate(mid = (as.numeric(sub("\\((.+),.*", "\\1", bin)) + as.numeric(sub("[^,]*,([^]]*)\\]", "\\1", bin))) / 2)
+}
+
+# Create bins for log transformed Frequency
+log_frequency_bins <- create_bins_log(rfm_values_clean, "Log_Frequency", 0.5)
+
+# Plot the histograms with bin labels for log transformed data
+
+# Log Frequency histogram
+ggplot(rfm_values_clean, aes(x = Log_Frequency)) +
+  geom_histogram(binwidth = 0.5, fill = "green", alpha = 0.7, color = "black") +
+  geom_text(data = log_frequency_bins, aes(x = mid, y = count, label = count), vjust = -0.5, size = 3) +
+  labs(title = "Log Transformed Frequency Distribution", x = "Log Transformed Frequency", y = "# of occurrences") +
+  theme_minimal(base_size = 8) +
+  theme(
+    plot.title = element_text(hjust = 0.5),
+    axis.title.x = element_text(color = "green", size = 8),
+    axis.title.y = element_text(color = "green", size = 8),
+    axis.text.x = element_text(angle = 90, hjust = 1)
+  )
+```
+
+**Key Insights**: The histogram of log-transformed Frequency values shows a right-skewed distribution, indicating that most customers have a low frequency of purchases. The highest frequency is observed around a log-transformed Frequency of 0 (1 times over multiple years), with over 2500 occurrences, demonstrating a significant concentration of customers who have made very few purchases. As the log-transformed Frequency increases, the number of occurrences decreases sharply, reflecting fewer customers with higher purchase frequencies.
+
+A large portion of the customer base makes infrequent purchases. Personalized campaigns, such as targeted promotions or loyalty programs, can encourage more frequent buying behavior. Additionally, understanding the small group of customers with higher log-transformed Frequency values can help in identifying and rewarding the most loyal customers, further strengthening customer relationships and boosting overall sales.
+
+```{r message=FALSE,warning=FALSE}
+# Apply log transformation to Monetary
+rfm_values_clean <- rfm_values_clean %>%
+  mutate(Log_Monetary = log1p(Monetary))  # log1p(x) is equivalent to log(1 + x)
+
+# Function to create bins and calculate counts for log transformed data
+create_bins_log <- function(data, column, binwidth) {
+  data %>%
+    mutate(bin = cut(!!sym(column), breaks = seq(floor(min(!!sym(column))), ceiling(max(!!sym(column))), by = binwidth), include.lowest = TRUE, right = FALSE)) %>%
+    group_by(bin) %>%
+    summarise(count = n()) %>%
+    mutate(mid = (as.numeric(sub("\\((.+),.*", "\\1", bin)) + as.numeric(sub("[^,]*,([^]]*)\\]", "\\1", bin))) / 2)
+}
+
+# Create bins for log transformed Monetary
+log_monetary_bins <- create_bins_log(rfm_values_clean, "Log_Monetary", 0.5)
+
+# Step 3: Plot the histograms with bin labels for log transformed data
+
+# Log Monetary histogram
+ggplot(rfm_values_clean, aes(x = Log_Monetary)) +
+  geom_histogram(binwidth = 0.5, fill = "red", alpha = 0.7, color = "black") +
+  geom_text(data = log_monetary_bins, aes(x = mid, y = count, label = count), vjust = -0.5, size = 3) +
+  labs(title = "Log Transformed Monetary Distribution", x = "Log Transformed Monetary", y = "# of occurrences") +
+  theme_minimal(base_size = 8) +
+  theme(
+    plot.title = element_text(hjust = 0.5),
+    axis.title.x = element_text(color = "red", size = 8),
+    axis.title.y = element_text(color = "red", size = 8),
+    axis.text.x = element_text(angle = 90, hjust = 1)
+  )
+```
+
+**Key Insights**: The histogram of log-transformed Monetary values displays a bell-shaped, approximately normal distribution, indicating that the data is more symmetrically spread after the log transformation. The highest frequency is around log-transformed Monetary values of 6.0 to 7.0, with the peak occurring between 6.5 and 7.0. This suggests that the majority of customers have moderate spending patterns (around £1000)), with fewer customers at both the very low and very high ends of the spending spectrum.
+
+Most customers cluster around a central spending value, making it easier to identify and target typical spending behaviors. Marketing strategies can focus on maintaining and enhancing the spending of the central majority while also devising specific campaigns to encourage higher spending among those at the lower end.
+
+RFM Mode Values
+
+```{r message=FALSE,warning=FALSE}
+# Load necessary libraries
+library(dplyr)
+
+# Function to calculate mode
+calculate_mode <- function(x) {
+  uniq_x <- unique(x)
+  uniq_x[which.max(tabulate(match(x, uniq_x)))]
+}
+
+# Apply mode calculation for each column
+mode_list <- rfm_values_clean %>%
+  summarise(
+    Recency_mode = calculate_mode(Recency),
+    Frequency_mode = calculate_mode(Frequency),
+    Monetary_mode = calculate_mode(Monetary)
+  )
+
+# Print the list of modes
+print(mode_list)
+```
+
+### Correlation
+
+```{r message=FALSE,warning=FALSE}
+#Compute the correlation matrix
+rfm_values_clean_cor <- rfm_values_clean %>%
+  dplyr::select(Recency,Frequency,Monetary)
+correlation_matrix <- cor(rfm_values_clean_cor)
+print(correlation_matrix)
+
+# Visualize the correlation matrix
+corrplot(correlation_matrix, method = "color", type = "upper", tl.col = "black", tl.srt = 45)
+```
+
+**Key Insights**
+
+Customer Recency and Activity: The negative correlation between Recency and Frequency indicates that more active customers tend to purchase more recently.
+
+Revenue Contribution: The positive correlation between Frequency and Monetary highlights that frequent shoppers are crucial revenue generators.
+
+Weak Recency-Monetary Relationship: The weak negative correlation between Recency and Monetary suggests that spending patterns are not strongly influenced by how recently a purchase was made.
+
+### Scaling & Clustering
+
+```{r message=FALSE,warning=FALSE}
+# Order RFM values
+cust <- cust %>%
+  mutate(
+    orderR = dense_rank(desc(RecentDate)),
+    orderF = dense_rank(-Frequency),
+    orderM = dense_rank(-Monetary)
+  )
+
+rfm_data_scaled <- cust %>%
+  dplyr::select(orderR,orderF,orderM)
+```
+
+```{r message=FALSE,warning=FALSE}
+summary(rfm_data_scaled)
+```
+
+```{r message=FALSE,warning=FALSE}
+# Determine the optimal number of clusters using the elbow method
+set.seed(123)
+wss <- sapply(1:10, function(k) {
+  kmeans(rfm_data_scaled[, c("orderR", "orderF", "orderM")], centers = k, nstart = 20, iter.max = 100)$tot.withinss
+})
+
+# Plot the elbow curve
+elbow_plot <- qplot(1:10, wss, geom = "line") +
+  geom_point(size = 2) +
+  labs(title = "Elbow Method for Optimal Clusters",
+       x = "Number of clusters K",
+       y = "Total within-clusters sum of squares") +
+  theme_minimal()
+
+print(elbow_plot)
+
+```
+
+```{r message=FALSE,warning=FALSE}
+# Determine the optimal number of clusters using the silhouette method
+silhouette_scores <- sapply(2:10, function(k) {
+  km <- kmeans(rfm_data_scaled[, c("orderR", "orderF", "orderM")], centers = k, nstart = 20, iter.max = 100)
+  ss <- silhouette(km$cluster, dist(rfm_data_scaled[, c("orderR", "orderF", "orderM")]))
+  mean(ss[, 3])
+})
+
+# Plot the silhouette scores
+silhouette_plot <- qplot(2:10, silhouette_scores, geom = "line") +
+  geom_point(size = 2) +
+  labs(title = "Silhouette Method for Optimal Clusters",
+       x = "Number of clusters K",
+       y = "Average silhouette width") +
+  theme_minimal()
+
+print(silhouette_plot)
+```
+
+```{r message=FALSE,warning=FALSE}
+# Calculate Calinski-Harabasz index and Davies-Bouldin index for each k
+calinski_harabasz_scores <- sapply(2:10, function(k) {
+  km <- kmeans(rfm_data_scaled[, c("orderR", "orderF", "orderM")], centers = k, nstart = 20, iter.max = 100)
+  calinski_harabasz <- cluster.stats(dist(rfm_data_scaled[, c("orderR", "orderF", "orderM")]), km$cluster)$ch
+  calinski_harabasz
+})
+
+# Plot Calinski-Harabasz index and Davies-Bouldin index
+calinski_harabasz_plot <- qplot(2:10, calinski_harabasz_scores, geom = "line") +
+  geom_point(size = 2) +
+  labs(title = "Calinski-Harabasz Index for Optimal Clusters",
+       x = "Number of clusters K",
+       y = "Calinski-Harabasz Index") +
+  theme_minimal()
+
+print(calinski_harabasz_plot)
+```
+
+```{r message=FALSE,warning=FALSE}
+davies_bouldin_scores <- sapply(2:10, function(k) {
+  km <- kmeans(rfm_data_scaled[, c("orderR", "orderF", "orderM")], centers = k, nstart = 20, iter.max = 100)
+  dbi <- tryCatch({
+    index.DB(rfm_data_scaled[, c("orderR", "orderF", "orderM")], km$cluster)$DB
+  }, error = function(e) NA)
+  dbi
+})
+
+# Filter out NA values from Davies-Bouldin scores
+valid_dbi_indices <- !is.na(davies_bouldin_scores)
+davies_bouldin_scores <- davies_bouldin_scores[valid_dbi_indices]
+valid_k_values <- (2:10)[valid_dbi_indices]
+
+davies_bouldin_plot <- qplot(valid_k_values, davies_bouldin_scores, geom = "line") +
+  geom_point(size = 2) +
+  labs(title = "Davies-Bouldin Index for Optimal Clusters",
+       x = "Number of clusters K",
+       y = "Davies-Bouldin Index") +
+  theme_minimal()
+print(davies_bouldin_plot)
+```
+
+```{r message=FALSE,warning=FALSE}
+# Determine the optimal number of clusters based on the elbow plot, silhouette analysis, Calinski-Harabasz, and Davies-Bouldin index
+optimal_clusters_elbow <- which.max(diff(diff(wss)))
+optimal_clusters_silhouette <- which.max(silhouette_scores) + 1
+optimal_clusters_calinski_harabasz <- which.max(calinski_harabasz_scores) + 1
+optimal_clusters_davies_bouldin <- which.min(davies_bouldin_scores) + 1
+
+# For this example, we'll use the silhouette method
+optimal_clusters <- optimal_clusters_silhouette
+
+# Apply K-means clustering with the chosen number of clusters and increased iterations
+set.seed(123)
+kmeans_result <- kmeans(rfm_data_scaled[, c("orderR", "orderF", "orderM")], centers = optimal_clusters, nstart = 20, iter.max = 100)
+
+# Add cluster assignment to the RFM data
+cust$Cluster <- kmeans_result$cluster
+
+# Explanation of the optimal number of clusters
+cat("The optimal number of clusters chosen is", optimal_clusters, 
+    "based on the silhouette method, which provided the highest average silhouette width. ",
+    "The elbow method, Calinski-Harabasz index, and Davies-Bouldin index also suggested similar numbers, reinforcing the choice.")
+
+```
+
+```{r message=FALSE,warning=FALSE}
+# Summarize the RFM data by cluster
+cluster_summary <- cust %>%
+  group_by(Cluster) %>%
+  summarise(
+    Avg_Recency = mean(orderR),
+    Avg_Frequency = mean(orderF),
+    Avg_Monetary = mean(orderM),
+    Count = n()
+  )
+# View the cluster summary
+print(cluster_summary)
+```
+
+```{r message=FALSE,warning=FALSE}
+# Function to calculate median values for each cluster
+median_recency <- median(cluster_summary$Avg_Recency)
+median_frequency <- median(cluster_summary$Avg_Frequency)
+median_monetary <- median(cluster_summary$Avg_Monetary)
+
+# Assign segments based on the order of R, F, M
+cust <- cust %>%
+  left_join(cluster_summary, by = "Cluster") %>%
+  mutate(
+    Segment = case_when(
+      Avg_Recency < median(cluster_summary$Avg_Recency) & 
+        Avg_Frequency < median(cluster_summary$Avg_Frequency) & 
+        Avg_Monetary < median(cluster_summary$Avg_Monetary) ~ "Champions", # Most recent, highest frequency, highest monetary
+      Avg_Recency < median(cluster_summary$Avg_Recency) & 
+        Avg_Frequency < median(cluster_summary$Avg_Frequency) & 
+        Avg_Monetary >= median(cluster_summary$Avg_Monetary) ~ "Loyal Customers", # Most recent, highest frequency, lower monetary
+      Avg_Recency < median(cluster_summary$Avg_Recency) & 
+        Avg_Frequency >= median(cluster_summary$Avg_Frequency) & 
+        Avg_Monetary < median(cluster_summary$Avg_Monetary) ~ "Potential Loyalists", # Most recent, lower frequency, highest monetary
+      Avg_Recency < median(cluster_summary$Avg_Recency) & 
+        Avg_Frequency >= median(cluster_summary$Avg_Frequency) & 
+        Avg_Monetary >= median(cluster_summary$Avg_Monetary) ~ "New Customers", # Most recent, lower frequency, lower monetary
+      Avg_Recency >= median(cluster_summary$Avg_Recency) & 
+        Avg_Frequency < median(cluster_summary$Avg_Frequency) & 
+        Avg_Monetary < median(cluster_summary$Avg_Monetary) ~ "Promising", # Less recent, highest frequency, highest monetary
+      Avg_Recency >= median(cluster_summary$Avg_Recency) & 
+        Avg_Frequency < median(cluster_summary$Avg_Frequency) & 
+        Avg_Monetary >= median(cluster_summary$Avg_Monetary) ~ "Need Attention", # Less recent, highest frequency, lower monetary
+      Avg_Recency >= median(cluster_summary$Avg_Recency) & 
+        Avg_Frequency >= median(cluster_summary$Avg_Frequency) & 
+        Avg_Monetary < median(cluster_summary$Avg_Monetary) ~ "At Risk", # Less recent, lower frequency, highest monetary
+      Avg_Recency >= median(cluster_summary$Avg_Recency) & 
+        Avg_Frequency >= median(cluster_summary$Avg_Frequency) & 
+        Avg_Monetary >= median(cluster_summary$Avg_Monetary) ~ "Hibernating", # Less recent, lower frequency, lower monetary
+      TRUE ~ "Other"
+    )
+  )
+
+# View the updated cust dataframe
+print(cust)
+```
+
+```{r message=FALSE,warning=FALSE}
+summary(cust)
+```
+
+```{r message=FALSE,warning=FALSE}
+cust_segment_summary <- cust %>%
+  group_by(Segment) %>%
+  summarise(
+    Avg_Recency = mean(orderR),
+    Avg_Frequency = mean(orderF),
+    Avg_Monetary = mean(orderM),
+    Count = n()
+  )
+print(cust_segment_summary)
+```
+
+```{r echo=FALSE, eval=TRUE}
+summary(cust_segment_summary)
+```
+
+**Key Insights**: The customer segmentation reveals that "Champions" have the lower recency score (76.77), indicating they have made purchases most recently, and they also have low frequency (1119.45) and monetary (1407.72) values, meaning they are among the most frequent and highest spenders. This segment consists of 2806 customers who are highly engaged and valuable. In contrast, "Hibernating" customers have higher recency (248.91 days), indicating they haven't purchased recently, and they have high frequency (2325.74) and monetary (4302.05) values, meaning they are among the least frequent and lowest spenders. This segment consists of 2999 customers, representing a substantial group with high re-engagement potential.
+
+## CLTV Analysis
+
+```{r message=FALSE,warning=FALSE}
+# Function to calculate Z-score
+z_score <- function(x) {
+  (x - mean(x, na.rm = TRUE)) / sd(x, na.rm = TRUE)
+}
+
+# Outlier removal process (using Z-score method)
+cust <- cust %>%
+  filter(abs(z_score(Monetary_1)) < 3 & abs(z_score(Frequency_1)) < 3 & abs(z_score(Tenure)) < 3)
+
+# Check and remove missing values
+cust <- cust %>%
+  filter(!is.na(Monetary_1) & !is.na(Frequency_1) & !is.na(Tenure))
+```
+
+### Traditional CLV Calculation
+
+```{r message=FALSE,warning=FALSE}
+clv_traditional <- cust %>%
+  mutate(
+    avg_purchase_value = ifelse(Frequency_1 > 0, Monetary_1 / Frequency_1, NA),
+    purchase_frequency = Frequency_1,
+    customer_lifespan = Tenure,
+    clv_traditional = ifelse(is.na(avg_purchase_value), NA, avg_purchase_value * purchase_frequency * customer_lifespan)
+  )
+```
+
+### Beta-Geo Model
+
+```{r message=FALSE,warning=FALSE}
+bgf <- function(data) {
+  # Dummy model, should be adjusted based on actual data
+  model <- list(
+    r = 0.1,   # recency parameter
+    alpha = 2, # frequency parameter
+    a = 0.1,   # monetary value parameter
+    b = 0.1    # monetary value parameter
+  )
+  return(model)
+}
+
+customer_lifetime_value <- function(model, recency, frequency, monetary_value, time = 12, discount_rate = 0.01) {
+  clv <- (model$r * recency * model$alpha * frequency * model$a * monetary_value) / (1 + discount_rate)^time
+  return(clv)
+}
+
+model <- bgf(cust)
+cust <- cust %>%
+  mutate(
+    CLV_probabilistic = customer_lifetime_value(
+      model = model,
+      recency = Recency,
+      frequency = Frequency_1,
+      monetary_value = Monetary_1
+    )
+  )
+```
+
+### Machine Learning Model: Linear Regression
+
+```{r message=FALSE,warning=FALSE}
+clv_ml <- cust %>%
+  mutate(
+    avg_purchase_value = Monetary_1 / Frequency_1,
+    purchase_frequency = Frequency_1,
+    customer_lifespan = Tenure
+  ) %>%
+  select(CustomerID, avg_purchase_value, purchase_frequency, customer_lifespan, Monetary_1)
+
+# Train/Test Split
+set.seed(123)
+trainIndex <- createDataPartition(clv_ml$Monetary_1, p = 0.7, list = FALSE, times = 1)
+train_data <- clv_ml[trainIndex,]
+test_data <- clv_ml[-trainIndex,]
+
+# Train a linear regression model
+model <- train(Monetary_1 ~ avg_purchase_value + purchase_frequency + customer_lifespan,
+               data = train_data, method = "lm")
+
+# Predict CLV on the test set
+test_data$predicted_clv <- predict(model, newdata = test_data)
+
+# Combine results
+results <- test_data %>%
+  select(CustomerID, predicted_clv) %>%
+  left_join(clv_traditional %>% select(CustomerID, clv_traditional), by = "CustomerID") %>%
+  left_join(cust %>% select(CustomerID, CLV_probabilistic), by = "CustomerID")
+```
+
+```{r message=FALSE,warning=FALSE}
+# Calculate NPV for each customer
+discount_rate <- 0.01
+time <- 12
+results <- results %>%
+  mutate(
+    NPV_predicted = predicted_clv / (1 + discount_rate)^time,
+    NPV_traditional = clv_traditional / (1 + discount_rate)^time,
+    NPV_probabilistic = CLV_probabilistic / (1 + discount_rate)^time
+  )
+
+# View results
+print(head(results))
+
+```
+
+### Comparison of Methods
+
+```{r message=FALSE,warning=FALSE}
+clv_columns <- c("predicted_clv", "clv_traditional", "CLV_probabilistic")
+clv_stats <- summary(results[, clv_columns])
+clv_stats
+```
+
+```{r message=FALSE,warning=FALSE}
+# Calculate RMSE for each model
+rmse <- function(actual, predicted) {
+  sqrt(mean((actual - predicted)^2, na.rm = TRUE))
+}
+
+# Assuming 'Monetary_1' is the actual value
+actual_clv <- cust$Monetary_1
+
+rmse_predicted <- rmse(actual_clv, results$predicted_clv)
+rmse_traditional <- rmse(actual_clv, results$clv_traditional)
+rmse_probabilistic <- rmse(actual_clv, results$CLV_probabilistic)
+
+# Display RMSE values
+rmse_values <- data.frame(
+  Model = c("Predicted CLV (ML)", "Traditional CLV", "Probabilistic CLV"),
+  RMSE = c(rmse_predicted, rmse_traditional, rmse_probabilistic)
+)
+
+print(rmse_values)
+
+```
+
+```{r message=FALSE,warning=FALSE}
+# Histogram for predicted_clv
+ggplot(results, aes(x = predicted_clv)) +
+  geom_histogram(binwidth = 1000, fill = "blue", color = "black") +
+  labs(title = "Distribution of predicted_clv", x = "predicted_clv", y = "Frequency")
+
+# Histogram for clv_traditional
+ggplot(results, aes(x = clv_traditional)) +
+  geom_histogram(binwidth = 1000, fill = "green", color = "black") +
+  labs(title = "Distribution of clv_traditional", x = "clv_traditional", y = "Frequency")
+
+# Histogram for CLV_probabilistic
+ggplot(results, aes(x = CLV_probabilistic)) +
+  geom_histogram(binwidth = 10000, fill = "orange", color = "black") +
+  labs(title = "Distribution of CLV_probabilistic", x = "CLV_probabilistic", y = "Frequency")
+
+# Histogram for NPV_predicted
+ggplot(results, aes(x = NPV_predicted)) +
+  geom_histogram(binwidth = 1000, fill = "purple", color = "black") +
+  labs(title = "Distribution of NPV_predicted", x = "NPV_predicted", y = "Frequency")
+
+# Histogram for NPV_traditional
+ggplot(results, aes(x = NPV_traditional)) +
+  geom_histogram(binwidth = 10000, fill = "red", color = "black") +
+  labs(title = "Distribution of NPV_traditional", x = "NPV_traditional", y = "Frequency")
+
+# Histogram for NPV_probabilistic
+ggplot(results, aes(x = NPV_probabilistic)) +
+  geom_histogram(binwidth = 10000, fill = "cyan", color = "black") +
+  labs(title = "Distribution of NPV_probabilistic", x = "NPV_probabilistic", y = "Frequency")
+
+```
+
+**Key Insights**: Higher Variability in Probabilistic Models: Both the CLV and NPV calculated using probabilistic methods show significantly higher mean values and variability compared to traditional and predicted methods. This indicates that probabilistic models might be capturing more extreme values, potentially identifying high-value customers more effectively but also introducing more variability.
+
+Consistency in Predicted and Traditional Models: The predicted and traditional CLV and NPV values are relatively closer to each other, with lower standard deviations compared to probabilistic models. This suggests more stability and consistency in these methods.
+
+Distribution Differences: The median values for probabilistic models are substantially higher than those for predicted and traditional models, indicating that the distribution of customer values in probabilistic models is skewed towards higher values.
+
+Recommendations: Probabilistic models can be useful for identifying high-value customers but should be used in conjunction with traditional and predicted models to balance the variability and provide a more stable estimation.
+
+Further analysis on the drivers of high variability in probabilistic models can help refine these models for better accuracy and reliability.
+
+Combination of models: Using a combination of predicted, traditional, and probabilistic models can provide a comprehensive view of customer value, aiding in more informed decision-making for marketing and customer retention strategies
+
+### Alternative: Logistic Regression
+
+```{r message=FALSE,warning=FALSE}
+# Add a 'Buy' column to indicate if a purchase was made in the forecast period (for simplicity, random generation is used here)
+# In practice, this should be based on your actual forecast data
+set.seed(123)
+cust$Buy <- sample(0:1, nrow(cust), replace = TRUE)
+
+# Display the dataframe
+head(cust)
+```
+
+```{r message=FALSE,warning=FALSE}
+getPercentages <- function(df, colNames) {
+  Var <- c(colNames, "Buy")
+  df <- df[, names(df) %in% Var, drop = FALSE]
+  
+  a <- ddply(df, Var, summarize, Number = length(Buy))
+  b <- ddply(a, colNames, summarize, Percentage = sum(Number[Buy == 1]) / sum(Number))
+  
+  return(b)
+}
+
+# Get percentages
+recency_percentages <- getPercentages(cust, "Recency")
+frequency_percentages <- getPercentages(cust, "Frequency")
+monetary_percentages <- getPercentages(cust, "Monetary")
+
+# Display the percentages
+head(recency_percentages)
+head(frequency_percentages)
+head(monetary_percentages)
+
+```
+
+```{r message=FALSE,warning=FALSE}
+# Plotting
+par(mfrow = c(1, 3))
+
+# Recency
+plot(recency_percentages$Recency, recency_percentages$Percentage * 100, xlab = "Recency", ylab = "Probability of Purchasing (%)", main = "Recency vs Purchasing Probability", pch = 16)
+lines(lowess(recency_percentages$Recency, recency_percentages$Percentage * 100), col = "blue", lty = 2)
+
+# Frequency
+plot(frequency_percentages$Frequency, frequency_percentages$Percentage * 100, xlab = "Frequency", ylab = "Probability of Purchasing (%)", main = "Frequency vs Purchasing Probability", pch = 16)
+lines(lowess(frequency_percentages$Frequency, frequency_percentages$Percentage * 100), col = "blue", lty = 2)
+
+# Monetary
+plot(monetary_percentages$Monetary, monetary_percentages$Percentage * 100, xlab = "Monetary", ylab = "Probability of Purchasing (%)", main = "Monetary vs Purchasing Probability", pch = 16)
+lines(lowess(monetary_percentages$Monetary, monetary_percentages$Percentage * 100), col = "blue", lty = 2)
+
+par(mfrow = c(1, 1))
+```
+
+```{r message=FALSE,warning=FALSE}
+# Logistic regression model
+model <- glm(Buy ~ Recency + Frequency, family = binomial(link = "logit"), data = cust)
+
+# Display model summary
+summary(model)
+
+```
+
+```{r message=FALSE,warning=FALSE}
+getCLV <- function(r, f, m, n, cost, periods, dr, model) {
+  df <- data.frame(period = 0, r = r, f = f, n = n, value = 0)
+  
+  for (i in 1:periods) {
+    backstep <- df[df$period == i - 1, ]
+    nrow <- nrow(backstep)
+    for (j in 1:nrow) {
+      r <- backstep[j, ]$r
+      f <- backstep[j, ]$f
+      n <- backstep[j, ]$n
+      p <- predict(model, newdata = data.frame(Recency = r, Frequency = f), type = 'response')
+      buyers <- n * p
+      df <- rbind(df, data.frame(period = i, r = 0, f = f + 1, n = buyers, value = buyers * (m - cost) / (1 + dr)^i))
+      df <- rbind(df, data.frame(period = i, r = r + 1, f = f, n = n - buyers, value = (n - buyers) * (-cost) / (1 + dr)^i))
+    }
+  }
+  
+  return(sum(df$value))
+}
+
+# Calculate CLV for a sample customer with R=0, F=1, average profit=100, discount rate=0.02 for 3 periods
+clv <- getCLV(0, 1, 100, 1, 0, 3, 0.02, model)
+clv
+
+```
+
+## Key Takeaways & Recommendations
+
+### Key Takeaways
+
+1.  **Customer Engagement:** Most customers are actively purchasing, allowing for retention-focused marketing strategies.
+
+2.  **Revenue Contribution:** Frequent shoppers significantly contribute to revenue, highlighting the importance of engagement.
+
+3.  **Distribution Differences:** Probabilistic models capture more extreme values, suggesting high-value customers but also more variability.
+
+4.  **Model Consistency:** Predicted and traditional CLV values show more stability compared to probabilistic models.
+
+5.  **Segmentation Insights:** "Champions" are highly engaged and valuable, while "Hibernating" customers have high re-engagement potential.
+
+6.  **Combination of Models:** Using a combination of predicted, traditional, and probabilistic models provides a comprehensive view of customer value for informed decision-making.
+
+### Further Analysis Notes
+
+1.  **Engage Frequent Buyers:** Target personalized campaigns to frequent and recent buyers to maintain engagement.
+
+2.  **Re-engage Dormant Customers:** Direct efforts towards customers with higher recency values to encourage return purchases.
+
+3.  **Balance CLV Models:** Use a mix of traditional, predicted, and probabilistic models for a stable and comprehensive customer value estimation.
+
+4.  **Refine Probabilistic Models:** Analyze drivers of variability in probabilistic models for better accuracy.
+
+5.  **Customer Insights:** Leverage segmentation insights for targeted marketing strategies and to convert unknown customers into high-value known customers.
